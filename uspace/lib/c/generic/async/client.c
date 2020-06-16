@@ -1049,32 +1049,29 @@ async_sess_t *async_connect_kbox(task_id_t id, errno_t *rc)
 	return sess;
 }
 
-static errno_t async_hangup_internal(cap_phone_handle_t phone)
+static void async_hangup_internal(cap_phone_handle_t phone)
 {
-	return ipc_hangup(phone);
+	errno_t rc;
+
+	rc = ipc_hangup(phone);
+	assert(rc == EOK);
+	(void) rc;
 }
 
 /** Wrapper for ipc_hangup.
  *
  * @param sess Session to hung up.
- *
- * @return Zero on success or an error code.
- *
  */
-errno_t async_hangup(async_sess_t *sess)
+void async_hangup(async_sess_t *sess)
 {
 	async_exch_t *exch;
 
 	assert(sess);
 
 	fibril_mutex_lock(&async_sess_mutex);
+	assert(sess->exchanges == 0);
 
-	if (sess->exchanges > 0) {
-		fibril_mutex_unlock(&async_sess_mutex);
-		return EBUSY;
-	}
-
-	errno_t rc = async_hangup_internal(sess->phone);
+	async_hangup_internal(sess->phone);
 
 	while (!list_empty(&sess->exch_list)) {
 		exch = (async_exch_t *)
@@ -1083,15 +1080,15 @@ errno_t async_hangup(async_sess_t *sess)
 
 		list_remove(&exch->sess_link);
 		list_remove(&exch->global_link);
-		async_hangup_internal(exch->phone);
+		if (sess->mgmt != EXCHANGE_ATOMIC &&
+		    sess->mgmt != EXCHANGE_SERIALIZE)
+			async_hangup_internal(exch->phone);
 		free(exch);
 	}
 
 	free(sess);
 
 	fibril_mutex_unlock(&async_sess_mutex);
-
-	return rc;
 }
 
 /** Start new exchange in a session.
