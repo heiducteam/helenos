@@ -41,6 +41,7 @@
 #include <io/con_srv.h>
 #include <io/concaps.h>
 #include <io/console.h>
+#include <loc.h>
 #include <task.h>
 #include <adt/list.h>
 #include <adt/prodcons.h>
@@ -418,7 +419,7 @@ static errno_t term_read(con_srv_t *srv, void *buf, size_t size, size_t *nread)
 			/* Accept key presses of printable chars only. */
 			if (event->type == CEV_KEY && event->ev.key.type == KEY_PRESS &&
 			    event->ev.key.c != 0) {
-				wchar_t tmp[2] = {
+				char32_t tmp[2] = {
 					event->ev.key.c,
 					0
 				};
@@ -435,7 +436,7 @@ static errno_t term_read(con_srv_t *srv, void *buf, size_t size, size_t *nread)
 	return EOK;
 }
 
-static void term_write_char(terminal_t *term, wchar_t ch)
+static void term_write_char(terminal_t *term, char32_t ch)
 {
 	sysarg_t updated = 0;
 
@@ -454,7 +455,7 @@ static void term_write_char(terminal_t *term, wchar_t ch)
 		updated = chargrid_backspace(term->frontbuf);
 		break;
 	default:
-		updated = chargrid_putwchar(term->frontbuf, ch, true);
+		updated = chargrid_putuchar(term->frontbuf, ch, true);
 	}
 
 	fibril_mutex_unlock(&term->mtx);

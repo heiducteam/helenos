@@ -124,7 +124,7 @@ static bool loc_fqsn_split(const char *fqsn, char **ns_name, char **name)
 
 	size_t offset = 0;
 	size_t offset_prev = 0;
-	wchar_t c;
+	char32_t c;
 
 	while ((c = str_decode(fqsn, &offset, STR_NO_LIMIT)) != 0) {
 		if (c == '/') {
@@ -1377,10 +1377,10 @@ static bool loc_init(void)
 	cat = category_new("irc");
 	categ_dir_add_cat(&cdir, cat);
 
-	cat = category_new("visualizer");
+	cat = category_new("renderer");
 	categ_dir_add_cat(&cdir, cat);
 
-	cat = category_new("renderer");
+	cat = category_new("display-device");
 	categ_dir_add_cat(&cdir, cat);
 
 	cat = category_new("audio-pcm");
