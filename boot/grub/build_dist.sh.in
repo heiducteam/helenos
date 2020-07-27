@@ -36,7 +36,7 @@ GRUB_CFG="$3"
 rm -rf ${DIST_DIR}
 
 mkdir -p ${DIST_DIR}/boot/grub
-cp -r -L -t ${DIST_DIR}/boot/grub ${GRUB_DIR}/*
+cp -R -L ${GRUB_DIR}/* ${DIST_DIR}/boot/grub 
 cp ${GRUB_CFG} ${DIST_DIR}/boot/grub
 
 gunzip -q ${DIST_DIR}/boot/grub/*.gz || true

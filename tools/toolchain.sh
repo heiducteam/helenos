@@ -41,7 +41,8 @@ GCC_BRANCH="8_2_0-helenos"
 GCC_VERSION="8.2.0"
 
 BASEDIR="`pwd`"
-SRCDIR="$(readlink -f $(dirname "$0"))"
+#SRCDIR="$(readlink -f $(dirname "$0"))"
+SRCDIR="$(cd "$(dirname "$0")";pwd)"
 
 REAL_INSTALL=true
 USE_HELENOS_TARGET=true
@@ -348,10 +349,11 @@ build_target() {
 			ARCH=mips32
 		fi
 
-		cp -r -L -t "${WORKDIR}/sysroot/include" \
+		cp -R -L  \
 			${SRCDIR}/../abi/include/* \
 			${SRCDIR}/../uspace/lib/c/arch/${ARCH}/include/* \
-			${SRCDIR}/../uspace/lib/c/include/*
+			${SRCDIR}/../uspace/lib/c/include/* \
+			"${WORKDIR}/sysroot/include"
 		check_error $? "Failed to create build sysroot."
 	fi
 
@@ -462,8 +464,8 @@ build_target() {
 
 	if $REAL_INSTALL ; then
 		echo ">>> Moving to the destination directory."
-		echo cp -r -t "${PREFIX}" "${INSTALL_DIR}/${PREFIX}/"*
-		cp -r -t "${PREFIX}" "${INSTALL_DIR}/${PREFIX}/"*
+		echo cp -r  "${INSTALL_DIR}/${PREFIX}/"* "${PREFIX}"
+		cp -r "${INSTALL_DIR}/${PREFIX}/"*  "${PREFIX}"
 	fi
 
 	cd "${BASEDIR}"
