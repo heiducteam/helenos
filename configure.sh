@@ -106,8 +106,8 @@ else
 	"${SOURCE_DIR}/tools/config.py" "${CONFIG_RULES}" "${CONFIG_DEFAULTS}" || exit 1
 fi
 
-PLATFORM=`sed -n '/^PLATFORM\b/p' Makefile.config | sed 's:[^=]*= ::'`
-MACHINE=`sed -n '/^MACHINE\b/p' Makefile.config | sed 's:[^=]*= ::'`
+PLATFORM=`sed -n '/^PLATFORM/p' Makefile.config | sed 's:[^=]*= ::'`
+MACHINE=`sed -n '/^MACHINE/p' Makefile.config | sed 's:[^=]*= ::'`
 
 cross_target="$PLATFORM"
 if [ "$PLATFORM" = 'abs32le' ]; then

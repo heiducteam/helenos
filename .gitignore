@@ -6,3 +6,7 @@
 tags
 tools/sycek/
 tools/xcw/demo/viewer
+tools/PKG
+tools/downloads
+
+.DS_Store
