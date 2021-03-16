@@ -1,7 +1,7 @@
 /*
+ * Copyright (c) 2021 Jiri Svoboda
  * Copyright (c) 2006 Josef Cejka
  * Copyright (c) 2006 Jakub Vana
- * Copyright (c) 2008 Jiri Svoboda
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,6 +34,7 @@
 /** @file
  */
 
+#include <as.h>
 #include <libc.h>
 #include <async.h>
 #include <errno.h>
@@ -178,7 +179,13 @@ static errno_t console_ev_decode(ipc_call_t *call, cons_event_t *event)
 	return EOK;
 }
 
-bool console_get_event(console_ctrl_t *ctrl, cons_event_t *event)
+/** Get console event.
+ *
+ * @param ctrl Console
+ * @param event Place to store event
+ * @return EOK on success, EIO on failure
+ */
+errno_t console_get_event(console_ctrl_t *ctrl, cons_event_t *event)
 {
 	if (ctrl->input_aid == 0) {
 		ipc_call_t result;
@@ -190,38 +197,40 @@ bool console_get_event(console_ctrl_t *ctrl, cons_event_t *event)
 		errno_t rc;
 		async_wait_for(aid, &rc);
 
-		if (rc != EOK) {
-			errno = rc;
-			return false;
-		}
+		if (rc != EOK)
+			return EIO;
 
 		rc = console_ev_decode(&result, event);
-		if (rc != EOK) {
-			errno = rc;
-			return false;
-		}
+		if (rc != EOK)
+			return EIO;
 	} else {
 		errno_t retval;
 		async_wait_for(ctrl->input_aid, &retval);
 
 		ctrl->input_aid = 0;
 
-		if (retval != EOK) {
-			errno = retval;
-			return false;
-		}
+		if (retval != EOK)
+			return EIO;
 
 		errno_t rc = console_ev_decode(&ctrl->input_call, event);
-		if (rc != EOK) {
-			errno = rc;
-			return false;
-		}
+		if (rc != EOK)
+			return EIO;
 	}
 
-	return true;
+	return EOK;
 }
 
-bool console_get_event_timeout(console_ctrl_t *ctrl, cons_event_t *event,
+/** Get console event with timeout.
+ *
+ * @param ctrl Console
+ * @param event Place to store event
+ * @param timeout Pointer to timeout. This will be updated to reflect
+ *                the remaining time in case of timeout.
+ * @return EOK on success (event received), ETIMEOUT on time out,
+ *         EIO on I/O error (e.g. lost console connection), ENOMEM
+ *         if out of memory
+ */
+errno_t console_get_event_timeout(console_ctrl_t *ctrl, cons_event_t *event,
     usec_t *timeout)
 {
 	struct timespec t0;
@@ -237,30 +246,107 @@ bool console_get_event_timeout(console_ctrl_t *ctrl, cons_event_t *event,
 	errno_t retval;
 	errno_t rc = async_wait_timeout(ctrl->input_aid, &retval, *timeout);
 	if (rc != EOK) {
+		if (rc == ENOMEM)
+			return ENOMEM;
 		*timeout = 0;
-		errno = rc;
-		return false;
+		return ETIMEOUT;
 	}
 
 	ctrl->input_aid = 0;
 
-	if (retval != EOK) {
-		errno = retval;
-		return false;
-	}
+	if (retval != EOK)
+		return EIO;
 
 	rc = console_ev_decode(&ctrl->input_call, event);
-	if (rc != EOK) {
-		errno = rc;
-		return false;
-	}
+	if (rc != EOK)
+		return EIO;
 
 	/* Update timeout */
 	struct timespec t1;
 	getuptime(&t1);
 	*timeout -= NSEC2USEC(ts_sub_diff(&t1, &t0));
 
-	return true;
+	return EOK;
+}
+
+/** Create a shared buffer for fast rendering to the console.
+ *
+ * @param ctrl Console
+ * @param cols Number of columns
+ * @param rows Number of rows
+ * @param rbuf Place to store pointer to the shared buffer
+ * @return EOK on success or an error code
+ */
+errno_t console_map(console_ctrl_t *ctrl, sysarg_t cols, sysarg_t rows,
+    charfield_t **rbuf)
+{
+	async_exch_t *exch = NULL;
+	void *buf;
+	aid_t req;
+	ipc_call_t answer;
+	size_t asize;
+	errno_t rc;
+
+	exch = async_exchange_begin(ctrl->output_sess);
+	req = async_send_2(exch, CONSOLE_MAP, cols, rows, &answer);
+	if (rc != EOK)
+		goto error;
+
+	asize = PAGES2SIZE(SIZE2PAGES(cols * rows * sizeof(charfield_t)));
+
+	rc = async_share_in_start_0_0(exch, asize, &buf);
+	if (rc != EOK) {
+		async_forget(req);
+		goto error;
+	}
+
+	async_exchange_end(exch);
+	exch = NULL;
+
+	async_wait_for(req, &rc);
+	if (rc != EOK)
+		goto error;
+
+	*rbuf = (charfield_t *)buf;
+	return EOK;
+error:
+	if (exch != NULL)
+		async_exchange_end(exch);
+	return rc;
+}
+
+/** Unmap console shared buffer.
+ *
+ * @param ctrl Console
+ * @param buf Buffer
+ */
+void console_unmap(console_ctrl_t *ctrl, charfield_t *buf)
+{
+	async_exch_t *exch = async_exchange_begin(ctrl->output_sess);
+	(void) async_req_0_0(exch, CONSOLE_UNMAP);
+	async_exchange_end(exch);
+
+	as_area_destroy(buf);
+}
+
+/** Update console rectangle from shared buffer.
+ *
+ * @param ctrl Console
+ * @param c0 Column coordinate of top-left corner (inclusive)
+ * @param r0 Row coordinate of top-left corner (inclusive)
+ * @param c1 Column coordinate of bottom-right corner (exclusive)
+ * @param r1 Row coordinate of bottom-right corner (exclusive)
+ *
+ * @return EOK on sucess or an error code
+ */
+errno_t console_update(console_ctrl_t *ctrl, sysarg_t c0, sysarg_t r0,
+    sysarg_t c1, sysarg_t r1)
+{
+	async_exch_t *exch = async_exchange_begin(ctrl->output_sess);
+	errno_t rc = async_req_4_0(exch, CONSOLE_UPDATE, c0, r0, c1, r1);
+	async_exchange_end(exch);
+
+	return rc;
 }
 
 /** @}
