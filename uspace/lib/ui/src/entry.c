@@ -46,11 +46,13 @@
 #include <ui/paint.h>
 #include <ui/entry.h>
 #include <ui/ui.h>
+#include <ui/window.h>
 #include "../private/entry.h"
 #include "../private/resource.h"
 
 static void ui_entry_ctl_destroy(void *);
 static errno_t ui_entry_ctl_paint(void *);
+static ui_evclaim_t ui_entry_ctl_kbd_event(void *, kbd_event_t *);
 static ui_evclaim_t ui_entry_ctl_pos_event(void *, pos_event_t *);
 
 enum {
@@ -64,17 +66,18 @@ enum {
 ui_control_ops_t ui_entry_ops = {
 	.destroy = ui_entry_ctl_destroy,
 	.paint = ui_entry_ctl_paint,
+	.kbd_event = ui_entry_ctl_kbd_event,
 	.pos_event = ui_entry_ctl_pos_event
 };
 
 /** Create new text entry.
  *
- * @param resource UI resource
+ * @param window UI window
  * @param text Text
  * @param rentry Place to store pointer to new text entry
  * @return EOK on success, ENOMEM if out of memory
  */
-errno_t ui_entry_create(ui_resource_t *resource, const char *text,
+errno_t ui_entry_create(ui_window_t *window, const char *text,
     ui_entry_t **rentry)
 {
 	ui_entry_t *entry;
@@ -97,7 +100,7 @@ errno_t ui_entry_create(ui_resource_t *resource, const char *text,
 		return ENOMEM;
 	}
 
-	entry->res = resource;
+	entry->window = window;
 	entry->halign = gfx_halign_left;
 	*rentry = entry;
 	return EOK;
@@ -146,6 +149,16 @@ void ui_entry_set_halign(ui_entry_t *entry, gfx_halign_t halign)
 	entry->halign = halign;
 }
 
+/** Set text entry read-only flag.
+ *
+ * @param entry Text entry
+ * @param read_only True iff entry is to be read-only.
+ */
+void ui_entry_set_read_only(ui_entry_t *entry, bool read_only)
+{
+	entry->read_only = read_only;
+}
+
 /** Set entry text.
  *
  * @param entry Text entry
@@ -173,14 +186,18 @@ errno_t ui_entry_set_text(ui_entry_t *entry, const char *text)
  */
 errno_t ui_entry_paint(ui_entry_t *entry)
 {
+	ui_resource_t *res;
 	gfx_text_fmt_t fmt;
 	gfx_coord2_t pos;
 	gfx_coord_t hpad;
 	gfx_coord_t vpad;
+	gfx_coord_t width;
 	gfx_rect_t inside;
 	errno_t rc;
 
-	if (entry->res->textmode) {
+	res = ui_window_get_res(entry->window);
+
+	if (res->textmode) {
 		hpad = ui_entry_hpad_text;
 		vpad = ui_entry_vpad_text;
 	} else {
@@ -188,9 +205,9 @@ errno_t ui_entry_paint(ui_entry_t *entry)
 		vpad = ui_entry_vpad;
 	}
 
-	if (entry->res->textmode == false) {
+	if (res->textmode == false) {
 		/* Paint inset frame */
-		rc = ui_paint_inset_frame(entry->res, &entry->rect, &inside);
+		rc = ui_paint_inset_frame(res, &entry->rect, &inside);
 		if (rc != EOK)
 			goto error;
 	} else {
@@ -199,13 +216,15 @@ errno_t ui_entry_paint(ui_entry_t *entry)
 
 	/* Paint entry background */
 
-	rc = gfx_set_color(entry->res->gc, entry->res->entry_bg_color);
+	rc = gfx_set_color(res->gc, res->entry_bg_color);
 	if (rc != EOK)
 		goto error;
 
-	rc = gfx_fill_rect(entry->res->gc, &inside);
+	rc = gfx_fill_rect(res->gc, &inside);
 	if (rc != EOK)
 		goto error;
+
+	width = gfx_text_width(res->font, entry->text);
 
 	switch (entry->halign) {
 	case gfx_halign_left:
@@ -213,25 +232,46 @@ errno_t ui_entry_paint(ui_entry_t *entry)
 		pos.x = inside.p0.x + hpad;
 		break;
 	case gfx_halign_center:
-		pos.x = (inside.p0.x + inside.p1.x) / 2;
+		pos.x = (inside.p0.x + inside.p1.x) / 2 - width / 2;
 		break;
 	case gfx_halign_right:
-		pos.x = inside.p1.x - hpad - 1;
+		pos.x = inside.p1.x - hpad - 1 - width;
 		break;
 	}
 
 	pos.y = inside.p0.y + vpad;
 
 	gfx_text_fmt_init(&fmt);
-	fmt.color = entry->res->entry_fg_color;
-	fmt.halign = entry->halign;
+	fmt.color = res->entry_fg_color;
+	fmt.halign = gfx_halign_left;
 	fmt.valign = gfx_valign_top;
 
-	rc = gfx_puttext(entry->res->font, &pos, &fmt, entry->text);
+	rc = gfx_set_clip_rect(res->gc, &inside);
 	if (rc != EOK)
 		goto error;
 
-	rc = gfx_update(entry->res->gc);
+	rc = gfx_puttext(res->font, &pos, &fmt, entry->text);
+	if (rc != EOK) {
+		(void) gfx_set_clip_rect(res->gc, NULL);
+		goto error;
+	}
+
+	if (entry->active) {
+		/* Cursor */
+		pos.x += width;
+
+		rc = gfx_puttext(res->font, &pos, &fmt, "_");
+		if (rc != EOK) {
+			(void) gfx_set_clip_rect(res->gc, NULL);
+			goto error;
+		}
+	}
+
+	rc = gfx_set_clip_rect(res->gc, NULL);
+	if (rc != EOK)
+		goto error;
+
+	rc = gfx_update(res->gc);
 	if (rc != EOK)
 		goto error;
 
@@ -263,18 +303,175 @@ errno_t ui_entry_ctl_paint(void *arg)
 	return ui_entry_paint(entry);
 }
 
+/** Insert string at cursor position.
+ *
+ * @param entry Text entry
+ * @param str String
+ * @return EOK on success, ENOMEM if out of memory
+ */
+errno_t ui_entry_insert_str(ui_entry_t *entry, const char *str)
+{
+	char *newtext;
+	char *oldtext;
+	int rc;
+
+	rc = asprintf(&newtext, "%s%s", entry->text, str);
+	if (rc < 0)
+		return ENOMEM;
+
+	oldtext = entry->text;
+	entry->text = newtext;
+	free(oldtext);
+	ui_entry_paint(entry);
+
+	return EOK;
+}
+
+/** Delete character before cursor.
+ *
+ * @param entry Text entry
+ */
+void ui_entry_backspace(ui_entry_t *entry)
+{
+	size_t off;
+
+	off = str_size(entry->text);
+	(void) str_decode_reverse(entry->text, &off,
+	    str_size(entry->text));
+	entry->text[off] = '\0';
+	ui_entry_paint(entry);
+}
+
+/** Handle text entry key press without modifiers.
+ *
+ * @param entry Text entry
+ * @param kbd_event Keyboard event
+ * @return @c ui_claimed iff the event is claimed
+ */
+ui_evclaim_t ui_entry_key_press_unmod(ui_entry_t *entry, kbd_event_t *event)
+{
+	assert(event->type == KEY_PRESS);
+
+	if (event->key == KC_BACKSPACE)
+		ui_entry_backspace(entry);
+
+	if (event->key == KC_ESCAPE) {
+		entry->active = false;
+		(void) ui_entry_paint(entry);
+	}
+
+	return ui_claimed;
+}
+
+/** Handle text entry keyboard event.
+ *
+ * @param entry Text entry
+ * @param kbd_event Keyboard event
+ * @return @c ui_claimed iff the event is claimed
+ */
+ui_evclaim_t ui_entry_kbd_event(ui_entry_t *entry, kbd_event_t *event)
+{
+	char buf[STR_BOUNDS(1) + 1];
+	size_t off;
+	errno_t rc;
+
+	if (!entry->active)
+		return ui_unclaimed;
+
+	if (event->type == KEY_PRESS && event->c >= ' ') {
+		off = 0;
+		rc = chr_encode(event->c, buf, &off, sizeof(buf));
+		if (rc == EOK) {
+			buf[off] = '\0';
+			(void) ui_entry_insert_str(entry, buf);
+		}
+	}
+
+	if (event->type == KEY_PRESS &&
+	    (event->mods & (KM_CTRL | KM_ALT | KM_SHIFT)) == 0)
+		return ui_entry_key_press_unmod(entry, event);
+
+	return ui_claimed;
+}
+
+/** Handle text entry position event.
+ *
+ * @param entry Text entry
+ * @param pos_event Position event
+ * @return @c ui_claimed iff the event is claimed
+ */
+ui_evclaim_t ui_entry_pos_event(ui_entry_t *entry, pos_event_t *event)
+{
+	gfx_coord2_t pos;
+
+	if (entry->read_only)
+		return ui_unclaimed;
+
+	if (event->type == POS_UPDATE) {
+		pos.x = event->hpos;
+		pos.y = event->vpos;
+
+		if (gfx_pix_inside_rect(&pos, &entry->rect)) {
+			if (!entry->pointer_inside) {
+				ui_window_set_ctl_cursor(entry->window,
+				    ui_curs_ibeam);
+				entry->pointer_inside = true;
+			}
+		} else {
+			if (entry->pointer_inside) {
+				ui_window_set_ctl_cursor(entry->window,
+				    ui_curs_arrow);
+				entry->pointer_inside = false;
+			}
+		}
+	}
+
+	if (event->type == POS_PRESS) {
+		pos.x = event->hpos;
+		pos.y = event->vpos;
+
+		if (gfx_pix_inside_rect(&pos, &entry->rect)) {
+			if (!entry->active) {
+				entry->active = true;
+				(void) ui_entry_paint(entry);
+			}
+
+			return ui_claimed;
+		} else {
+			if (entry->active) {
+				entry->active = false;
+				(void) ui_entry_paint(entry);
+			}
+		}
+	}
+
+	return ui_unclaimed;
+}
+
+/** Handle text entry control keyboard event.
+ *
+ * @param arg Argument (ui_entry_t *)
+ * @param kbd_event Keyboard event
+ * @return @c ui_claimed iff the event is claimed
+ */
+static ui_evclaim_t ui_entry_ctl_kbd_event(void *arg, kbd_event_t *event)
+{
+	ui_entry_t *entry = (ui_entry_t *) arg;
+
+	return ui_entry_kbd_event(entry, event);
+}
+
 /** Handle text entry control position event.
  *
  * @param arg Argument (ui_entry_t *)
  * @param pos_event Position event
  * @return @c ui_claimed iff the event is claimed
  */
-ui_evclaim_t ui_entry_ctl_pos_event(void *arg, pos_event_t *event)
+static ui_evclaim_t ui_entry_ctl_pos_event(void *arg, pos_event_t *event)
 {
 	ui_entry_t *entry = (ui_entry_t *) arg;
 
-	(void) entry;
-	return ui_unclaimed;
+	return ui_entry_pos_event(entry, event);
 }
 
 /** @}

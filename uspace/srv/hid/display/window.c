@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Jiri Svoboda
+ * Copyright (c) 2021 Jiri Svoboda
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -66,6 +66,7 @@ errno_t ds_window_create(ds_client_t *client, display_wnd_params_t *params,
     ds_window_t **rgc)
 {
 	ds_window_t *wnd = NULL;
+	ds_seat_t *seat;
 	gfx_context_t *dgc;
 	gfx_coord2_t dims;
 	gfx_bitmap_params_t bparams;
@@ -115,6 +116,26 @@ errno_t ds_window_create(ds_client_t *client, display_wnd_params_t *params,
 	wnd->min_size = params->min_size;
 	wnd->gc = mem_gc_get_ctx(wnd->mgc);
 	wnd->cursor = wnd->display->cursor[dcurs_arrow];
+	wnd->flags = params->flags;
+
+	if ((params->flags & wndf_setpos) != 0) {
+		/* Specific window position */
+		wnd->dpos = params->pos;
+	} else {
+		/* Automatic window placement */
+		wnd->dpos.x = ((wnd->id - 1) & 1) * 400;
+		wnd->dpos.y = ((wnd->id - 1) & 2) / 2 * 300;
+	}
+
+	seat = ds_display_first_seat(client->display);
+
+	if ((params->flags & wndf_popup) != 0)
+		ds_seat_set_popup(seat, wnd);
+	else
+		ds_seat_set_focus(seat, wnd);
+
+	(void) ds_display_paint(wnd->display, NULL);
+
 	*rgc = wnd;
 	return EOK;
 error:
@@ -655,6 +676,15 @@ void ds_window_move(ds_window_t *wnd, gfx_coord2_t *dpos)
 {
 	wnd->dpos = *dpos;
 	(void) ds_display_paint(wnd->display, NULL);
+}
+
+/** Get window position.
+ *
+ * @param wnd Window
+ */
+void ds_window_get_pos(ds_window_t *wnd, gfx_coord2_t *dpos)
+{
+	*dpos = wnd->dpos;
 }
 
 /** Start resizing a window, detected by client.

@@ -68,6 +68,9 @@ static ui_window_cb_t ui_window_cb = {
 };
 
 static bool quit = false;
+static gfx_typeface_t *tface;
+static gfx_font_t *font;
+static gfx_coord_t vpad;
 
 /** Clear screen.
  *
@@ -106,6 +109,150 @@ error:
 	return rc;
 }
 
+/** Initialize demo font.
+ *
+ * @param gc Graphic context
+ * @param w Width
+ * @param h Height
+ * @return EOK on success or an error code
+ */
+static errno_t demo_font_init(gfx_context_t *gc, gfx_coord_t w, gfx_coord_t h)
+{
+	gfx_font_info_t *finfo;
+	errno_t rc;
+
+	if (quit)
+		return EOK;
+
+	/* XXX Crude way of detecting text mode */
+	if (w < 256) {
+		/* Create dummy font for text mode */
+		rc = gfx_typeface_create(gc, &tface);
+		if (rc != EOK) {
+			printf("Error creating typeface\n");
+			goto error;
+		}
+
+		rc = gfx_font_create_textmode(tface, &font);
+		if (rc != EOK) {
+			printf("Error creating font\n");
+			goto error;
+		}
+
+		vpad = 0;
+	} else {
+		/* Load font */
+		rc = gfx_typeface_open(gc, "/data/font/helena.tpf", &tface);
+		if (rc != EOK) {
+			printf("Error opening typeface\n");
+			goto error;
+		}
+
+		finfo = gfx_typeface_first_font(tface);
+		if (finfo == NULL) {
+			printf("Typeface contains no font.\n");
+			rc = ENOENT;
+			goto error;
+		}
+
+		rc = gfx_font_open(finfo, &font);
+		if (rc != EOK) {
+			printf("Error opening font.\n");
+			goto error;
+		}
+
+		vpad = 5;
+	}
+
+	return EOK;
+error:
+	if (tface != NULL)
+		gfx_typeface_destroy(tface);
+	return rc;
+}
+
+/** Finalize demo font. */
+static void demo_font_fini(void)
+{
+	if (font == NULL)
+		return;
+
+	gfx_font_close(font);
+	font = NULL;
+
+	gfx_typeface_destroy(tface);
+	tface = NULL;
+}
+
+/** Start a new demo screen.
+ *
+ * Clear the screen, display a status line and set up clipping.
+ *
+ * @param gc Graphic context
+ * @param w Width
+ * @param h Height
+ * @param text Demo screen description
+ * @return EOK on success or an error code
+ */
+static errno_t demo_begin(gfx_context_t *gc, gfx_coord_t w, gfx_coord_t h,
+    const char *text)
+{
+	gfx_text_fmt_t fmt;
+	gfx_font_metrics_t metrics;
+	gfx_coord2_t pos;
+	gfx_color_t *color;
+	gfx_rect_t rect;
+	gfx_coord_t height;
+	errno_t rc;
+
+	rc = gfx_set_clip_rect(gc, NULL);
+	if (rc != EOK)
+		return rc;
+
+	rc = clear_scr(gc, w, h);
+	if (rc != EOK)
+		return rc;
+
+	if (font != NULL) {
+		rc = gfx_color_new_rgb_i16(0xffff, 0xffff, 0xffff, &color);
+		if (rc != EOK)
+			goto error;
+
+		gfx_text_fmt_init(&fmt);
+		fmt.color = color;
+		fmt.halign = gfx_halign_center;
+		fmt.valign = gfx_valign_bottom;
+
+		pos.x = w / 2;
+		pos.y = h - 1;
+		rc = gfx_puttext(font, &pos, &fmt, text);
+		if (rc != EOK) {
+			printf("Error rendering text.\n");
+			gfx_color_delete(color);
+			goto error;
+		}
+
+		gfx_color_delete(color);
+
+		gfx_font_get_metrics(font, &metrics);
+		height = metrics.ascent + metrics.descent + 1;
+	} else {
+		height = 0;
+	}
+
+	rect.p0.x = 0;
+	rect.p0.y = 0;
+	rect.p1.x = w;
+	rect.p1.y = h - height - vpad;
+	rc = gfx_set_clip_rect(gc, &rect);
+	if (rc != EOK)
+		return rc;
+
+	return EOK;
+error:
+	return rc;
+}
+
 /** Run rectangle demo on a graphic context.
  *
  * @param gc Graphic context
@@ -122,7 +269,7 @@ static errno_t demo_rects(gfx_context_t *gc, gfx_coord_t w, gfx_coord_t h)
 	if (quit)
 		return EOK;
 
-	rc = clear_scr(gc, w, h);
+	rc = demo_begin(gc, w, h, "Rectangle rendering");
 	if (rc != EOK)
 		return rc;
 
@@ -281,7 +428,7 @@ static errno_t demo_bitmap(gfx_context_t *gc, gfx_coord_t w, gfx_coord_t h)
 	if (quit)
 		return EOK;
 
-	rc = clear_scr(gc, w, h);
+	rc = demo_begin(gc, w, h, "Bitmap rendering without offset");
 	if (rc != EOK)
 		return rc;
 
@@ -344,7 +491,7 @@ static errno_t demo_bitmap2(gfx_context_t *gc, gfx_coord_t w, gfx_coord_t h)
 	if (quit)
 		return EOK;
 
-	rc = clear_scr(gc, w, h);
+	rc = demo_begin(gc, w, h, "Bitmap rendering with offset");
 	if (rc != EOK)
 		return rc;
 
@@ -403,7 +550,7 @@ static errno_t demo_bitmap_kc(gfx_context_t *gc, gfx_coord_t w, gfx_coord_t h)
 	if (quit)
 		return EOK;
 
-	rc = clear_scr(gc, w, h);
+	rc = demo_begin(gc, w, h, "Bitmap rendering with color key");
 	if (rc != EOK)
 		return rc;
 
@@ -457,9 +604,6 @@ static errno_t demo_text(gfx_context_t *gc, gfx_coord_t w, gfx_coord_t h)
 {
 	gfx_color_t *color = NULL;
 	gfx_rect_t rect;
-	gfx_typeface_t *tface = NULL;
-	gfx_font_info_t *finfo;
-	gfx_font_t *font = NULL;
 	gfx_coord2_t pos;
 	gfx_text_fmt_t fmt;
 	int i;
@@ -468,43 +612,7 @@ static errno_t demo_text(gfx_context_t *gc, gfx_coord_t w, gfx_coord_t h)
 	if (quit)
 		return EOK;
 
-	/* XXX Crude way of detecting text mode */
-	if (w < 256) {
-		/* Create dummy font for text mode */
-		rc = gfx_typeface_create(gc, &tface);
-		if (rc != EOK) {
-			printf("Error creating typeface\n");
-			goto error;
-		}
-
-		rc = gfx_font_create_textmode(tface, &font);
-		if (rc != EOK) {
-			printf("Error creating font\n");
-			goto error;
-		}
-	} else {
-		/* Load font */
-		rc = gfx_typeface_open(gc, "/data/font/helena.tpf", &tface);
-		if (rc != EOK) {
-			printf("Error opening typeface\n");
-			goto error;
-		}
-
-		finfo = gfx_typeface_first_font(tface);
-		if (finfo == NULL) {
-			printf("Typeface contains no font.\n");
-			rc = ENOENT;
-			goto error;
-		}
-
-		rc = gfx_font_open(finfo, &font);
-		if (rc != EOK) {
-			printf("Error opening font.\n");
-			goto error;
-		}
-	}
-
-	rc = clear_scr(gc, w, h);
+	rc = demo_begin(gc, w, h, "Text rendering");
 	if (rc != EOK)
 		goto error;
 
@@ -541,9 +649,9 @@ static errno_t demo_text(gfx_context_t *gc, gfx_coord_t w, gfx_coord_t h)
 		goto error;
 
 	rect.p0.x = w / 20;
-	rect.p0.y = 2 * h / 15;
+	rect.p0.y = 1 * h / 15;
 	rect.p1.x = w - w / 20;
-	rect.p1.y = 5 * h / 15;
+	rect.p1.y = 4 * h / 15;
 
 	rc = gfx_fill_rect(gc, &rect);
 	if (rc != EOK)
@@ -639,7 +747,7 @@ static errno_t demo_text(gfx_context_t *gc, gfx_coord_t w, gfx_coord_t h)
 		fmt.color = color;
 
 		pos.x = w / 20;
-		pos.y = (7 + i) * h / 15;
+		pos.y = (6 + i) * h / 15;
 		rc = gfx_puttext(font, &pos, &fmt, "The quick brown fox jumps over the lazy dog.");
 		if (rc != EOK)
 			goto error;
@@ -653,14 +761,110 @@ static errno_t demo_text(gfx_context_t *gc, gfx_coord_t w, gfx_coord_t h)
 			break;
 	}
 
-	gfx_font_close(font);
-	gfx_typeface_destroy(tface);
 	return EOK;
 error:
-	if (font != NULL)
-		gfx_font_close(font);
-	if (tface != NULL)
-		gfx_typeface_destroy(tface);
+	return rc;
+}
+
+/** Run clipping demo on a graphic context.
+ *
+ * @param gc Graphic context
+ * @param w Width
+ * @param h Height
+ */
+static errno_t demo_clip(gfx_context_t *gc, gfx_coord_t w, gfx_coord_t h)
+{
+	gfx_bitmap_t *bitmap;
+	gfx_color_t *color;
+	gfx_bitmap_params_t params;
+	int i, j;
+	gfx_coord2_t offs;
+	gfx_rect_t rect;
+	errno_t rc;
+
+	if (quit)
+		return EOK;
+
+	rc = demo_begin(gc, w, h, "Clipping demonstration");
+	if (rc != EOK)
+		return rc;
+
+	gfx_bitmap_params_init(&params);
+	params.rect.p0.x = 0;
+	params.rect.p0.y = 0;
+	params.rect.p1.x = 40;
+	params.rect.p1.y = 20;
+
+	rc = gfx_bitmap_create(gc, &params, NULL, &bitmap);
+	if (rc != EOK)
+		return rc;
+
+	rc = bitmap_moire(bitmap, 40, 20);
+	if (rc != EOK)
+		goto error;
+
+	for (j = 0; j < 10; j++) {
+		rect.p0.x = w / 8;
+		rect.p0.y = h / 8;
+		rect.p1.x = w * 7 / 8;
+		rect.p1.y = h * 3 / 8;
+
+		rc = gfx_set_clip_rect(gc, &rect);
+		if (rc != EOK)
+			return rc;
+
+		rc = gfx_color_new_rgb_i16(rand() % 0x10000, rand() % 0x10000,
+		    rand() % 0x10000, &color);
+		if (rc != EOK)
+			return rc;
+
+		rc = gfx_set_color(gc, color);
+		if (rc != EOK)
+			return rc;
+
+		for (i = 0; i < 10; i++) {
+			rect.p0.x = rand() % (w - 1);
+			rect.p0.y = rand() % (h - 1);
+			rect.p1.x = rect.p0.x + rand() % (w - 1 - rect.p0.x);
+			rect.p1.y = rect.p0.y + rand() % (h - 1 - rect.p0.y);
+
+			rc = gfx_fill_rect(gc, &rect);
+			if (rc != EOK)
+				return rc;
+		}
+
+		gfx_color_delete(color);
+
+		rect.p0.x = w / 8;
+		rect.p0.y = h * 5 / 8;
+		rect.p1.x = w * 7 / 8;
+		rect.p1.y = h * 7 / 8;
+
+		rc = gfx_set_clip_rect(gc, &rect);
+		if (rc != EOK)
+			return rc;
+
+		for (i = 0; i < 10; i++) {
+			offs.x = rand() % (w - 40);
+			offs.y = rand() % (h - 20);
+
+			rc = gfx_bitmap_render(bitmap, NULL, &offs);
+			if (rc != EOK)
+				goto error;
+		}
+
+		fibril_usleep(500 * 1000);
+
+		if (quit)
+			break;
+	}
+
+	(void) gfx_set_clip_rect(gc, NULL);
+	gfx_bitmap_destroy(bitmap);
+	return EOK;
+error:
+	(void) gfx_set_clip_rect(gc, NULL);
+	gfx_bitmap_destroy(bitmap);
 	return rc;
 }
 
@@ -674,29 +878,39 @@ static errno_t demo_loop(gfx_context_t *gc, gfx_coord_t w, gfx_coord_t h)
 {
 	errno_t rc;
 
+	(void) demo_font_init(gc, w, h);
+
 	while (!quit) {
 		rc = demo_rects(gc, w, h);
 		if (rc != EOK)
-			return rc;
+			goto error;
 
 		rc = demo_bitmap(gc, w, h);
 		if (rc != EOK)
-			return rc;
+			goto error;
 
 		rc = demo_bitmap2(gc, w, h);
 		if (rc != EOK)
-			return rc;
+			goto error;
 
 		rc = demo_bitmap_kc(gc, w, h);
 		if (rc != EOK)
-			return rc;
+			goto error;
 
 		rc = demo_text(gc, w, h);
 		if (rc != EOK)
-			return rc;
+			goto error;
+
+		rc = demo_clip(gc, w, h);
+		if (rc != EOK)
+			goto error;
 	}
 
+	demo_font_fini();
 	return EOK;
+error:
+	demo_font_fini();
+	return rc;
 }
 
 /** Run demo on console. */

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Jiri Svoboda
+ * Copyright (c) 2021 Jiri Svoboda
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,6 +34,7 @@
  */
 
 #include <errno.h>
+#include <io/kbd_event.h>
 #include <io/pos_event.h>
 #include <stdlib.h>
 #include <ui/control.h>
@@ -90,6 +91,20 @@ void ui_control_destroy(ui_control_t *control)
 	return control->ops->destroy(control->ext);
 }
 
+/** Deliver keyboard event to UI control.
+ *
+ * @param control Control
+ * @param kbd_event Keyboard event
+ * @return @c ui_claimed iff the event is claimed
+ */
+ui_evclaim_t ui_control_kbd_event(ui_control_t *control, kbd_event_t *event)
+{
+	if (control->ops->kbd_event != NULL)
+		return control->ops->kbd_event(control->ext, event);
+	else
+		return ui_unclaimed;
+}
+
 /** Paint UI control.
  *
  * @param control Control
@@ -109,6 +124,16 @@ errno_t ui_control_paint(ui_control_t *control)
 ui_evclaim_t ui_control_pos_event(ui_control_t *control, pos_event_t *event)
 {
 	return control->ops->pos_event(control->ext, event);
+}
+
+/** Inform UI control that window has been unfocused.
+ *
+ * @param control Control
+ */
+void ui_control_unfocus(ui_control_t *control)
+{
+	if (control->ops->unfocus != NULL)
+		control->ops->unfocus(control->ext);
 }
 
 /** @}

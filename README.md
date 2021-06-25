@@ -9,7 +9,7 @@ via message passing. A failure or crash of one component does not
 directly harm others. HelenOS is therefore flexible, modular,
 extensible, fault tolerant and easy to understand.
 
-![screenshot](http://www.helenos.org/raw-attachment/wiki/Screenshots/screenshot.png "Screenshot")
+![screenshot](http://www.helenos.org/raw-attachment/wiki/Screenshots/newgui-aio.png "Screenshot")
 
 HelenOS aims to be compatible with the C11 and C++14 standards, but does not
 aspire to be a clone of any existing operating system and trades compatibility
@@ -34,9 +34,9 @@ and 64-bit desktop PCs to 64-bit Itanium and SPARC rack-mount servers.
 ### Building the toolchain
 
 In order to build HelenOS, one must first build the cross-compiler toolchain
-(either as a root or by specifying the `CROSS_PREFIX` environment variable)
-by running (example for the amd64 architecture, further list of targets can be
-found in the `default` directory):
+(the default installation location can be overridden by specifying the
+`CROSS_PREFIX` environment variable) by running (example for the amd64
+architecture, further list of targets can be found in the `default` directory):
 
 ```
 $ cd HelenOS/tools
@@ -60,8 +60,9 @@ Whereas for CentOS/Fedora, you will need:
 
 ```
 # sudo dnf group install 'Development Tools'
-# sudo dnf install wget texinfo libmpc-devel mpfr-devel gmp-devel PyYAML genisoimage flex bison
+# sudo dnf install wget texinfo PyYAML genisoimage flex bison
 ```
+
 In case the toolchain script won't work no matter how hard you try, let us know.
 Please supply as many relevant information (your OS and distribution, list of
 installed packages with version information, the output of the toolchain script, etc.) as
