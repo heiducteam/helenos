@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Jiri Svoboda
+ * Copyright (c) 2021 Jiri Svoboda
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,49 +34,13 @@
 #include <ui/control.h>
 #include <ui/entry.h>
 #include <ui/resource.h>
+#include <ui/ui.h>
+#include <ui/window.h>
 #include "../private/entry.h"
 
 PCUT_INIT;
 
 PCUT_TEST_SUITE(entry);
-
-static errno_t testgc_set_color(void *, gfx_color_t *);
-static errno_t testgc_fill_rect(void *, gfx_rect_t *);
-static errno_t testgc_bitmap_create(void *, gfx_bitmap_params_t *,
-    gfx_bitmap_alloc_t *, void **);
-static errno_t testgc_bitmap_destroy(void *);
-static errno_t testgc_bitmap_render(void *, gfx_rect_t *, gfx_coord2_t *);
-static errno_t testgc_bitmap_get_alloc(void *, gfx_bitmap_alloc_t *);
-
-static gfx_context_ops_t ops = {
-	.set_color = testgc_set_color,
-	.fill_rect = testgc_fill_rect,
-	.bitmap_create = testgc_bitmap_create,
-	.bitmap_destroy = testgc_bitmap_destroy,
-	.bitmap_render = testgc_bitmap_render,
-	.bitmap_get_alloc = testgc_bitmap_get_alloc
-};
-
-typedef struct {
-	bool bm_created;
-	bool bm_destroyed;
-	gfx_bitmap_params_t bm_params;
-	void *bm_pixels;
-	gfx_rect_t bm_srect;
-	gfx_coord2_t bm_offs;
-	bool bm_rendered;
-	bool bm_got_alloc;
-} test_gc_t;
-
-typedef struct {
-	test_gc_t *tgc;
-	gfx_bitmap_alloc_t alloc;
-	bool myalloc;
-} testgc_bitmap_t;
-
-typedef struct {
-	bool clicked;
-} test_cb_resp_t;
 
 /** Create and destroy text entry */
 PCUT_TEST(create_destroy)
@@ -154,6 +118,23 @@ PCUT_TEST(set_halign)
 	ui_entry_destroy(entry);
 }
 
+/** Set entry read only flag sets internal field */
+PCUT_TEST(set_read_only)
+{
+	ui_entry_t *entry;
+	errno_t rc;
+
+	rc = ui_entry_create(NULL, "Hello", &entry);
+	PCUT_ASSERT_ERRNO_VAL(EOK, rc);
+
+	ui_entry_set_read_only(entry, true);
+	PCUT_ASSERT_TRUE(entry->read_only);
+	ui_entry_set_read_only(entry, false);
+	PCUT_ASSERT_FALSE(entry->read_only);
+
+	ui_entry_destroy(entry);
+}
+
 /** Set text entry rectangle sets internal field */
 PCUT_TEST(set_text)
 {
@@ -182,106 +163,110 @@ PCUT_TEST(set_text)
 PCUT_TEST(paint)
 {
 	errno_t rc;
-	gfx_context_t *gc = NULL;
-	test_gc_t tgc;
-	ui_resource_t *resource = NULL;
+	ui_t *ui = NULL;
+	ui_window_t *window = NULL;
+	ui_wnd_params_t params;
 	ui_entry_t *entry;
 
-	memset(&tgc, 0, sizeof(tgc));
-	rc = gfx_context_new(&ops, &tgc, &gc);
+	rc = ui_create_disp(NULL, &ui);
 	PCUT_ASSERT_ERRNO_VAL(EOK, rc);
 
-	rc = ui_resource_create(gc, false, &resource);
-	PCUT_ASSERT_ERRNO_VAL(EOK, rc);
-	PCUT_ASSERT_NOT_NULL(resource);
+	ui_wnd_params_init(&params);
+	params.caption = "Hello";
 
-	rc = ui_entry_create(resource, "Hello", &entry);
+	rc = ui_window_create(ui, &params, &window);
+	PCUT_ASSERT_ERRNO_VAL(EOK, rc);
+	PCUT_ASSERT_NOT_NULL(window);
+
+	rc = ui_entry_create(window, "Hello", &entry);
 	PCUT_ASSERT_ERRNO_VAL(EOK, rc);
 
 	rc = ui_entry_paint(entry);
 	PCUT_ASSERT_ERRNO_VAL(EOK, rc);
 
 	ui_entry_destroy(entry);
-	ui_resource_destroy(resource);
+	ui_window_destroy(window);
+	ui_destroy(ui);
+}
 
-	rc = gfx_context_delete(gc);
+/** ui_entry_insert_str() inserts string at cursor. */
+PCUT_TEST(insert_str)
+{
+	errno_t rc;
+	ui_t *ui = NULL;
+	ui_window_t *window = NULL;
+	ui_wnd_params_t params;
+	ui_entry_t *entry;
+
+	rc = ui_create_disp(NULL, &ui);
 	PCUT_ASSERT_ERRNO_VAL(EOK, rc);
+
+	ui_wnd_params_init(&params);
+	params.caption = "Hello";
+
+	rc = ui_window_create(ui, &params, &window);
+	PCUT_ASSERT_ERRNO_VAL(EOK, rc);
+	PCUT_ASSERT_NOT_NULL(window);
+
+	rc = ui_entry_create(window, "A", &entry);
+	PCUT_ASSERT_ERRNO_VAL(EOK, rc);
+
+	PCUT_ASSERT_STR_EQUALS("A", entry->text);
+
+	rc = ui_entry_insert_str(entry, "B");
+	PCUT_ASSERT_ERRNO_VAL(EOK, rc);
+
+	PCUT_ASSERT_STR_EQUALS("AB", entry->text);
+
+	rc = ui_entry_insert_str(entry, "CD");
+	PCUT_ASSERT_ERRNO_VAL(EOK, rc);
+
+	PCUT_ASSERT_STR_EQUALS("ABCD", entry->text);
+
+	ui_entry_destroy(entry);
+	ui_window_destroy(window);
+	ui_destroy(ui);
 }
 
-static errno_t testgc_set_color(void *arg, gfx_color_t *color)
+/** ui_entry_backspace() deletes character before cursor. */
+PCUT_TEST(backspace)
 {
-	(void) arg;
-	(void) color;
-	return EOK;
-}
+	errno_t rc;
+	ui_t *ui = NULL;
+	ui_window_t *window = NULL;
+	ui_wnd_params_t params;
+	ui_entry_t *entry;
 
-static errno_t testgc_fill_rect(void *arg, gfx_rect_t *rect)
-{
-	(void) arg;
-	(void) rect;
-	return EOK;
-}
+	rc = ui_create_disp(NULL, &ui);
+	PCUT_ASSERT_ERRNO_VAL(EOK, rc);
 
-static errno_t testgc_bitmap_create(void *arg, gfx_bitmap_params_t *params,
-    gfx_bitmap_alloc_t *alloc, void **rbm)
-{
-	test_gc_t *tgc = (test_gc_t *) arg;
-	testgc_bitmap_t *tbm;
+	ui_wnd_params_init(&params);
+	params.caption = "Hello";
 
-	tbm = calloc(1, sizeof(testgc_bitmap_t));
-	if (tbm == NULL)
-		return ENOMEM;
+	rc = ui_window_create(ui, &params, &window);
+	PCUT_ASSERT_ERRNO_VAL(EOK, rc);
+	PCUT_ASSERT_NOT_NULL(window);
 
-	if (alloc == NULL) {
-		tbm->alloc.pitch = (params->rect.p1.x - params->rect.p0.x) *
-		    sizeof(uint32_t);
-		tbm->alloc.off0 = 0;
-		tbm->alloc.pixels = calloc(sizeof(uint32_t),
-		    (params->rect.p1.x - params->rect.p0.x) *
-		    (params->rect.p1.y - params->rect.p0.y));
-		tbm->myalloc = true;
-		if (tbm->alloc.pixels == NULL) {
-			free(tbm);
-			return ENOMEM;
-		}
-	} else {
-		tbm->alloc = *alloc;
-	}
+	rc = ui_entry_create(window, "ABC", &entry);
+	PCUT_ASSERT_ERRNO_VAL(EOK, rc);
 
-	tbm->tgc = tgc;
-	tgc->bm_created = true;
-	tgc->bm_params = *params;
-	tgc->bm_pixels = tbm->alloc.pixels;
-	*rbm = (void *)tbm;
-	return EOK;
-}
+	PCUT_ASSERT_STR_EQUALS("ABC", entry->text);
 
-static errno_t testgc_bitmap_destroy(void *bm)
-{
-	testgc_bitmap_t *tbm = (testgc_bitmap_t *)bm;
-	if (tbm->myalloc)
-		free(tbm->alloc.pixels);
-	tbm->tgc->bm_destroyed = true;
-	free(tbm);
-	return EOK;
-}
+	ui_entry_backspace(entry);
+	PCUT_ASSERT_STR_EQUALS("AB", entry->text);
 
-static errno_t testgc_bitmap_render(void *bm, gfx_rect_t *srect,
-    gfx_coord2_t *offs)
-{
-	testgc_bitmap_t *tbm = (testgc_bitmap_t *)bm;
-	tbm->tgc->bm_rendered = true;
-	tbm->tgc->bm_srect = *srect;
-	tbm->tgc->bm_offs = *offs;
-	return EOK;
-}
+	ui_entry_backspace(entry);
+	PCUT_ASSERT_STR_EQUALS("A", entry->text);
 
-static errno_t testgc_bitmap_get_alloc(void *bm, gfx_bitmap_alloc_t *alloc)
-{
-	testgc_bitmap_t *tbm = (testgc_bitmap_t *)bm;
-	*alloc = tbm->alloc;
-	tbm->tgc->bm_got_alloc = true;
-	return EOK;
+	ui_entry_backspace(entry);
+	PCUT_ASSERT_STR_EQUALS("", entry->text);
+
+	ui_entry_backspace(entry);
+	PCUT_ASSERT_STR_EQUALS("", entry->text);
+
+	ui_entry_destroy(entry);
+	ui_window_destroy(window);
+	ui_destroy(ui);
 }
 
 PCUT_EXPORT(entry);

@@ -41,6 +41,7 @@ installed_libs = [
 	'gfx',
 	'gfximage',
 	'ipcgfx',
+	'congfx',
 	'display',
 	'ui',
 ]
@@ -48,6 +49,10 @@ installed_libs = [
 # IMPORTANT: Dependencies must be listed before libs that depend on them.
 libs = [
 	'c',
+
+	'inet',
+
+	'device',
 
 	'block',
 	'clui',

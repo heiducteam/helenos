@@ -37,6 +37,7 @@
 #ifndef _UI_PRIVATE_WINDOW_H
 #define _UI_PRIVATE_WINDOW_H
 
+#include <adt/list.h>
 #include <errno.h>
 #include <congfx/console.h>
 #include <display.h>
@@ -54,14 +55,14 @@
 struct ui_window {
 	/** Containing user interface */
 	struct ui *ui;
+	/** Link to @c ui->windows */
+	link_t lwindows;
 	/** Callbacks */
 	struct ui_window_cb *cb;
 	/** Callback argument */
 	void *arg;
 	/** Display window */
 	display_window_t *dwindow;
-	/** Console GC */
-	console_gc_t *cgc;
 	/** Window GC */
 	gfx_context_t *gc;
 	/** Window bitmap (if client-side rendering) */
@@ -90,6 +91,7 @@ struct ui_window {
 	ui_stock_cursor_t cursor;
 };
 
+extern display_stock_cursor_t wnd_dcursor_from_cursor(ui_stock_cursor_t);
 extern void ui_window_send_close(ui_window_t *);
 extern void ui_window_send_focus(ui_window_t *);
 extern void ui_window_send_kbd(ui_window_t *, kbd_event_t *);

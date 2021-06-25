@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020 Jiri Svoboda
+ * Copyright (c) 2021 Jiri Svoboda
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -40,8 +40,10 @@ PCUT_INIT;
 
 PCUT_TEST_SUITE(checkbox);
 
+static errno_t testgc_set_clip_rect(void *, gfx_rect_t *);
 static errno_t testgc_set_color(void *, gfx_color_t *);
 static errno_t testgc_fill_rect(void *, gfx_rect_t *);
+static errno_t testgc_update(void *);
 static errno_t testgc_bitmap_create(void *, gfx_bitmap_params_t *,
     gfx_bitmap_alloc_t *, void **);
 static errno_t testgc_bitmap_destroy(void *);
@@ -49,8 +51,10 @@ static errno_t testgc_bitmap_render(void *, gfx_rect_t *, gfx_coord2_t *);
 static errno_t testgc_bitmap_get_alloc(void *, gfx_bitmap_alloc_t *);
 
 static gfx_context_ops_t ops = {
+	.set_clip_rect = testgc_set_clip_rect,
 	.set_color = testgc_set_color,
 	.fill_rect = testgc_fill_rect,
+	.update = testgc_update,
 	.bitmap_create = testgc_bitmap_create,
 	.bitmap_destroy = testgc_bitmap_destroy,
 	.bitmap_render = testgc_bitmap_render,
@@ -480,6 +484,13 @@ PCUT_TEST(pos_event_enter_leave)
 	PCUT_ASSERT_ERRNO_VAL(EOK, rc);
 }
 
+static errno_t testgc_set_clip_rect(void *arg, gfx_rect_t *rect)
+{
+	(void) arg;
+	(void) rect;
+	return EOK;
+}
+
 static errno_t testgc_set_color(void *arg, gfx_color_t *color)
 {
 	(void) arg;
@@ -491,6 +502,12 @@ static errno_t testgc_fill_rect(void *arg, gfx_rect_t *rect)
 {
 	(void) arg;
 	(void) rect;
+	return EOK;
+}
+
+static errno_t testgc_update(void *arg)
+{
+	(void) arg;
 	return EOK;
 }
 

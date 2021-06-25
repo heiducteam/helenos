@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Jiri Svoboda
+ * Copyright (c) 2021 Jiri Svoboda
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -47,6 +47,7 @@ static errno_t disp_window_create(void *, display_wnd_params_t *, sysarg_t *);
 static errno_t disp_window_destroy(void *, sysarg_t);
 static errno_t disp_window_move_req(void *, sysarg_t, gfx_coord2_t *);
 static errno_t disp_window_move(void *, sysarg_t, gfx_coord2_t *);
+static errno_t disp_window_get_pos(void *, sysarg_t, gfx_coord2_t *);
 static errno_t disp_window_resize_req(void *, sysarg_t,
     display_wnd_rsztype_t, gfx_coord2_t *);
 static errno_t disp_window_resize(void *, sysarg_t, gfx_coord2_t *,
@@ -60,6 +61,7 @@ display_ops_t display_srv_ops = {
 	.window_destroy = disp_window_destroy,
 	.window_move_req = disp_window_move_req,
 	.window_move = disp_window_move,
+	.window_get_pos = disp_window_get_pos,
 	.window_resize_req = disp_window_resize_req,
 	.window_resize = disp_window_resize,
 	.window_set_cursor = disp_window_set_cursor,
@@ -72,7 +74,6 @@ static errno_t disp_window_create(void *arg, display_wnd_params_t *params,
 {
 	errno_t rc;
 	ds_client_t *client = (ds_client_t *) arg;
-	ds_seat_t *seat;
 	ds_window_t *wnd;
 
 	log_msg(LOG_DEFAULT, LVL_DEBUG, "disp_window_create()");
@@ -88,14 +89,6 @@ static errno_t disp_window_create(void *arg, display_wnd_params_t *params,
 
 	log_msg(LOG_DEFAULT, LVL_DEBUG, "disp_window_create() -> EOK, id=%zu",
 	    wnd->id);
-
-	/* XXX All the below should probably be part of ds_window_create() */
-	wnd->dpos.x = ((wnd->id - 1) & 1) * 400;
-	wnd->dpos.y = ((wnd->id - 1) & 2) / 2 * 300;
-
-	seat = ds_display_first_seat(client->display);
-	ds_seat_set_focus(seat, wnd);
-	(void) ds_display_paint(wnd->display, NULL);
 
 	ds_display_unlock(client->display);
 
@@ -157,6 +150,26 @@ static errno_t disp_window_move(void *arg, sysarg_t wnd_id, gfx_coord2_t *pos)
 
 	log_msg(LOG_DEFAULT, LVL_DEBUG, "disp_window_move()");
 	ds_window_move(wnd, pos);
+	ds_display_unlock(client->display);
+	return EOK;
+}
+
+static errno_t disp_window_get_pos(void *arg, sysarg_t wnd_id,
+    gfx_coord2_t *pos)
+{
+	ds_client_t *client = (ds_client_t *) arg;
+	ds_window_t *wnd;
+
+	ds_display_lock(client->display);
+
+	wnd = ds_client_find_window(client, wnd_id);
+	if (wnd == NULL) {
+		ds_display_unlock(client->display);
+		return ENOENT;
+	}
+
+	log_msg(LOG_DEFAULT, LVL_DEBUG, "disp_window_get_pos()");
+	ds_window_get_pos(wnd, pos);
 	ds_display_unlock(client->display);
 	return EOK;
 }

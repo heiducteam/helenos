@@ -47,6 +47,7 @@
 #include <stdlib.h>
 #include "../private/memgc.h"
 
+static errno_t mem_gc_set_clip_rect(void *, gfx_rect_t *);
 static errno_t mem_gc_set_color(void *, gfx_color_t *);
 static errno_t mem_gc_fill_rect(void *, gfx_rect_t *);
 static errno_t mem_gc_update(void *);
@@ -58,6 +59,7 @@ static errno_t mem_gc_bitmap_get_alloc(void *, gfx_bitmap_alloc_t *);
 static void mem_gc_invalidate_rect(mem_gc_t *, gfx_rect_t *);
 
 gfx_context_ops_t mem_gc_ops = {
+	.set_clip_rect = mem_gc_set_clip_rect,
 	.set_color = mem_gc_set_color,
 	.fill_rect = mem_gc_fill_rect,
 	.update = mem_gc_update,
@@ -66,6 +68,25 @@ gfx_context_ops_t mem_gc_ops = {
 	.bitmap_render = mem_gc_bitmap_render,
 	.bitmap_get_alloc = mem_gc_bitmap_get_alloc
 };
+
+/** Set clipping rectangle on memory GC.
+ *
+ * @param arg Memory GC
+ * @param rect Rectangle
+ *
+ * @return EOK on success or an error code
+ */
+static errno_t mem_gc_set_clip_rect(void *arg, gfx_rect_t *rect)
+{
+	mem_gc_t *mgc = (mem_gc_t *) arg;
+
+	if (rect != NULL)
+		gfx_rect_clip(rect, &mgc->rect, &mgc->clip_rect);
+	else
+		mgc->clip_rect = mgc->rect;
+
+	return EOK;
+}
 
 /** Set color on memory GC.
  *
@@ -101,7 +122,7 @@ static errno_t mem_gc_fill_rect(void *arg, gfx_rect_t *rect)
 	pixelmap_t pixelmap;
 
 	/* Make sure we have a sorted, clipped rectangle */
-	gfx_rect_clip(rect, &mgc->rect, &crect);
+	gfx_rect_clip(rect, &mgc->clip_rect, &crect);
 
 	assert(mgc->rect.p0.x == 0);
 	assert(mgc->rect.p0.y == 0);
@@ -166,6 +187,7 @@ errno_t mem_gc_create(gfx_rect_t *rect, gfx_bitmap_alloc_t *alloc,
 
 	mgc->gc = gc;
 	mgc->rect = *rect;
+	mgc->clip_rect = *rect;
 	mgc->alloc = *alloc;
 
 	mgc->invalidate = invalidate_cb;
@@ -207,6 +229,7 @@ void mem_gc_retarget(mem_gc_t *mgc, gfx_rect_t *rect,
     gfx_bitmap_alloc_t *alloc)
 {
 	mgc->rect = *rect;
+	mgc->clip_rect = *rect;
 	mgc->alloc = *alloc;
 }
 
@@ -348,6 +371,7 @@ static errno_t mem_gc_bitmap_render(void *bm, gfx_rect_t *srect0,
 	mem_gc_bitmap_t *mbm = (mem_gc_bitmap_t *)bm;
 	gfx_rect_t srect;
 	gfx_rect_t drect;
+	gfx_rect_t crect;
 	gfx_coord2_t offs;
 	gfx_coord_t x, y;
 	pixelmap_t smap;
@@ -369,6 +393,9 @@ static errno_t mem_gc_bitmap_render(void *bm, gfx_rect_t *srect0,
 	/* Destination rectangle */
 	gfx_rect_translate(&offs, &srect, &drect);
 
+	/* Clip destination rectangle */
+	gfx_rect_clip(&drect, &mbm->mgc->clip_rect, &crect);
+
 	assert(mbm->alloc.pitch == (mbm->rect.p1.x - mbm->rect.p0.x) *
 	    (int)sizeof(uint32_t));
 	smap.width = mbm->rect.p1.x - mbm->rect.p0.x;
@@ -386,8 +413,8 @@ static errno_t mem_gc_bitmap_render(void *bm, gfx_rect_t *srect0,
 		/* Nothing to do */
 	} else if ((mbm->flags & bmpf_color_key) == 0) {
 		/* Simple copy */
-		for (y = drect.p0.y; y < drect.p1.y; y++) {
-			for (x = drect.p0.x; x < drect.p1.x; x++) {
+		for (y = crect.p0.y; y < crect.p1.y; y++) {
+			for (x = crect.p0.x; x < crect.p1.x; x++) {
 				pixel = pixelmap_get_pixel(&smap,
 				    x - mbm->rect.p0.x - offs.x,
 				    y - mbm->rect.p0.y - offs.y);
@@ -396,8 +423,8 @@ static errno_t mem_gc_bitmap_render(void *bm, gfx_rect_t *srect0,
 		}
 	} else if ((mbm->flags & bmpf_colorize) == 0) {
 		/* Color key */
-		for (y = drect.p0.y; y < drect.p1.y; y++) {
-			for (x = drect.p0.x; x < drect.p1.x; x++) {
+		for (y = crect.p0.y; y < crect.p1.y; y++) {
+			for (x = crect.p0.x; x < crect.p1.x; x++) {
 				pixel = pixelmap_get_pixel(&smap,
 				    x - mbm->rect.p0.x - offs.x,
 				    y - mbm->rect.p0.y - offs.y);
@@ -407,8 +434,8 @@ static errno_t mem_gc_bitmap_render(void *bm, gfx_rect_t *srect0,
 		}
 	} else {
 		/* Color key & colorization */
-		for (y = drect.p0.y; y < drect.p1.y; y++) {
-			for (x = drect.p0.x; x < drect.p1.x; x++) {
+		for (y = crect.p0.y; y < crect.p1.y; y++) {
+			for (x = crect.p0.x; x < crect.p1.x; x++) {
 				pixel = pixelmap_get_pixel(&smap,
 				    x - mbm->rect.p0.x - offs.x,
 				    y - mbm->rect.p0.y - offs.y);
@@ -419,7 +446,7 @@ static errno_t mem_gc_bitmap_render(void *bm, gfx_rect_t *srect0,
 		}
 	}
 
-	mem_gc_invalidate_rect(mbm->mgc, &drect);
+	mem_gc_invalidate_rect(mbm->mgc, &crect);
 	return EOK;
 }
 
